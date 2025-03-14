@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Sensor Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://bernii.github.io/gauge.js/dist/gauge.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            font-family: 'Poppins', sans-serif;
+            min-height: 100vh;
+        }
+
+        .dashboard-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+            border-radius: 0 0 25px 25px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .dashboard-title {
+            font-weight: 600;
+            font-size: 2.5rem;
+            margin: 0;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .sensor-card, .analysis-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+            padding: 25px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .sensor-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .gauge-container {
+            width: 200px;
+            height: 150px;
+            margin: 0 auto;
+        }
+
+        .sensor-card h5 {
+            color: #2c3e50;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+        }
+
+        .current-value {
+            font-size: 1.2rem;
+            color: #2c3e50;
+            font-weight: 500;
+            margin-top: 1rem;
+            padding: 8px 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            display: inline-block;
+        }
+
+        .chart-container {
+            height: 450px;
+            margin: 20px 0;
+        }
+
+        .refresh-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 1000;
+            padding: 15px 25px;
+            border-radius: 50px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .refresh-btn i {
+            margin-right: 8px;
+        }
+
+        .total-consumption {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            margin-bottom: 30px;
+        }
+
+        .total-consumption h3 {
+            color: #fff;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .total-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #fff;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .analysis-card {
+            background: white;
+            padding: 30px;
+        }
+
+        .analysis-card h3 {
+            color: #2c3e50;
+            font-weight: 600;
+            margin-bottom: 25px;
+        }
+
+        /* Status Indicators */
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-active {
+            background-color: #2ecc71;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7);
+            }
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 10px rgba(46, 204, 113, 0);
+            }
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(46, 204, 113, 0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-header">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1 class="dashboard-title">IoT Sensor Dashboard</h1>
+                <div class="d-flex align-items-center">
+                    <span class="status-indicator status-active"></span>
+                    <span class="text-white">Live Monitoring</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Sensor Gauges -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-3">
+                <div class="sensor-card text-center">
+                    <h5><i class="fas fa-plug me-2"></i>Sensor 1</h5>
+                    <canvas id="gauge1" class="gauge-container"></canvas>
+                    <div class="current-value">{{ sensor_values.sensor1 }} A</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="sensor-card text-center">
+                    <h5><i class="fas fa-plug me-2"></i>Sensor 2</h5>
+                    <canvas id="gauge2" class="gauge-container"></canvas>
+                    <div class="current-value">{{ sensor_values.sensor2 }} A</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="sensor-card text-center">
+                    <h5><i class="fas fa-plug me-2"></i>Sensor 3</h5>
+                    <canvas id="gauge3" class="gauge-container"></canvas>
+                    <div class="current-value">{{ sensor_values.sensor3 }} A</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="sensor-card text-center">
+                    <h5><i class="fas fa-plug me-2"></i>Sensor 4</h5>
+                    <canvas id="gauge4" class="gauge-container"></canvas>
+                    <div class="current-value">{{ sensor_values.sensor4 }} A</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Consumption -->
+        <div class="total-consumption text-center">
+            <h3><i class="fas fa-bolt me-2"></i>Total Current Consumption</h3>
+            <canvas id="gaugeTotal" class="gauge-container"></canvas>
+            <div class="total-value">{{ total }} A</div>
+        </div>
+
+        <!-- Monthly Analysis -->
+        <div class="analysis-card">
+            <h3><i class="fas fa-chart-bar me-2"></i>Monthly Usage Analysis</h3>
+            <div class="chart-container">
+                <canvas id="monthlyChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Refresh Button -->
+        <button onclick="location.reload()" class="btn btn-primary refresh-btn">
+            <i class="fas fa-sync-alt"></i> Refresh Data
+        </button>
+    </div>
+
+    <script>
+        // Create gauge charts using Gauge.js
+        function createGauge(elementId, value, maxValue, color) {
+            const opts = {
+                angle: 0.15,
+                lineWidth: 0.44,
+                radiusScale: 1,
+                pointer: {
+                    length: 0.6,
+                    strokeWidth: 0.035,
+                    color: '#000000'
+                },
+                limitMax: false,
+                limitMin: false,
+                colorStart: color,
+                colorStop: color,
+                strokeColor: '#E0E0E0',
+                generateGradient: true,
+                highDpiSupport: true,
+                percentColors: [[0.0, color]],
+                staticLabels: {
+                    font: "10px sans-serif",
+                    labels: [0, maxValue/2, maxValue],
+                    color: "#000000",
+                    fractionDigits: 0
+                },
+            };
+
+            const gauge = new Gauge(document.getElementById(elementId)).setOptions(opts);
+            gauge.maxValue = maxValue;
+            gauge.setMinValue(0);
+            gauge.animationSpeed = 32;
+            gauge.set(value);
+        }
+
+        // Initialize gauges with new colors
+        const maxValue = 100;
+        createGauge('gauge1', {{ sensor_values.sensor1 }}, maxValue, '#667eea');
+        createGauge('gauge2', {{ sensor_values.sensor2 }}, maxValue, '#764ba2');
+        createGauge('gauge3', {{ sensor_values.sensor3 }}, maxValue, '#2a5298');
+        createGauge('gauge4', {{ sensor_values.sensor4 }}, maxValue, '#1e3c72');
+        createGauge('gaugeTotal', {{ total }}, maxValue * 2, '#ffffff');
+
+        // Monthly analysis chart with enhanced styling
+        const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
+        const monthlyData = {{ monthly_data|tojson }};
+
+        new Chart(monthlyCtx, {
+            type: 'bar',
+            data: {
+                labels: monthlyData.months,
+                datasets: [
+                    {
+                        label: 'Sensor 1',
+                        data: monthlyData.sensor1_avg,
+                        backgroundColor: 'rgba(102, 126, 234, 0.7)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Sensor 2',
+                        data: monthlyData.sensor2_avg,
+                        backgroundColor: 'rgba(118, 75, 162, 0.7)',
+                        borderColor: 'rgba(118, 75, 162, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Sensor 3',
+                        data: monthlyData.sensor3_avg,
+                        backgroundColor: 'rgba(42, 82, 152, 0.7)',
+                        borderColor: 'rgba(42, 82, 152, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Sensor 4',
+                        data: monthlyData.sensor4_avg,
+                        backgroundColor: 'rgba(30, 60, 114, 0.7)',
+                        borderColor: 'rgba(30, 60, 114, 1)',
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Average Current (A)',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Month',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Monthly Average Current Consumption',
+                        font: {
+                            size: 16,
+                            weight: 'bold'
+                        }
+                    },
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // Auto-refresh every 15 seconds
+        setTimeout(() => {
+            location.reload();
+        }, 15000);
+    </script>
+</body>
+</html>

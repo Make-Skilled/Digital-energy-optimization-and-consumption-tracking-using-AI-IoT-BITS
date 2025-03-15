@@ -11,6 +11,9 @@ WiFiClient client;
 unsigned long channelid = 2571433;
 char thingSpeakWriteAPIKey[] = "DKFMSF5LBO7MG9F5";
 
+unsigned long billchannelid = 2463572;
+char billWriteAPIKey[] = "D4DB9ZE264CRSE9P";
+
 // Current Sensor Pins (ACS712)
 #define CURRENT_SENSOR_PIN1  35  // First ACS712 Sensor (A0)
 #define CURRENT_SENSOR_PIN2  34  // Second ACS712 Sensor (A1)
@@ -28,6 +31,7 @@ float powerValue2 = 0.0;
 float totalCurrent = 0.0;
 float totalPower = 0.0;
 float kWh = 0.0;
+
 
 // Timing variables
 unsigned long lastPrintTime = 0;
@@ -76,15 +80,21 @@ void measurePower() {
   kWh += totalPower * (currentMillis - lastPowerAlertTime) / 3600000.0;
   lastPowerAlertTime = currentMillis;
 
+  // Store absolute values of power in new variables
+  float absPowerValue1 = abs(powerValue1);
+  float absPowerValue2 = abs(powerValue2);
+  float absTotalPower = abs(totalPower);
+  float absKWh = abs(kWh);
+
   // Print values at regular intervals
   if (currentMillis - lastPrintTime >= PRINT_INTERVAL) {
     Serial.println("\n=== Power Consumption Report ===");
     Serial.println("--------------------------------");
     Serial.print("Current Sensor 1: "); 
-    Serial.print(abs(currentValue1), 2);  // Use abs() to show positive value
+    Serial.print(abs(currentValue1), 2);  // Use original values
     Serial.println(" A");
     Serial.print("Current Sensor 2: "); 
-    Serial.print(abs(currentValue2), 2);  // Use abs() to show positive value
+    Serial.print(abs(currentValue2), 2);  // Use original values
     Serial.println(" A");
     
     Serial.print("Voltage:     ");
@@ -92,19 +102,19 @@ void measurePower() {
     Serial.println(" V");
     
     Serial.print("Power Sensor 1: ");
-    Serial.print(abs(powerValue1), 2);  // Use abs() to show positive value
+    Serial.print(absPowerValue1, 2);  // Use the absolute value
     Serial.println(" W");
 
     Serial.print("Power Sensor 2: ");
-    Serial.print(abs(powerValue2), 2);  // Use abs() to show positive value
+    Serial.print(absPowerValue2, 2);  // Use the absolute value
     Serial.println(" W");
 
     Serial.print("Total Power:  ");
-    Serial.print(abs(totalPower), 2);  // Use abs() to show positive value
+    Serial.print(absTotalPower, 2);  // Use the absolute value
     Serial.println(" W");
 
     Serial.print("Energy:      ");
-    Serial.print(abs(kWh), 3);  // Use abs() to show positive value
+    Serial.print(absKWh, 3);  // Use the absolute value
     Serial.println(" kWh");
 
     // Print the RFID data if a card is scanned
@@ -120,12 +130,24 @@ void measurePower() {
 
 // Send Data to ThingSpeak
 void sendDataToThingSpeak() {
-  ThingSpeak.setField(1, currentValue1);
-  ThingSpeak.setField(2, currentValue2);
-  ThingSpeak.setField(3, kWh);
-  ThingSpeak.setField(4, cardScanned ? 1 : 0);  // Send RFID scan status (1 for scanned, 0 for not scanned)
+  ThingSpeak.setField(1, abs(powerValue1));
+  ThingSpeak.setField(2, abs(powerValue2));
+  ThingSpeak.setField(3, abs(kWh));
+  ThingSpeak.setField(1, cardScanned ? 1 : 0);  // Send RFID scan status (1 for scanned, 0 for not scanned)
   
   int responseCode = ThingSpeak.writeFields(channelid, thingSpeakWriteAPIKey);
+  if (responseCode == 200) {
+    Serial.println("✅ Data sent to ThingSpeak!");
+  } else {
+    Serial.print("❌ Error sending data: ");
+    Serial.println(responseCode);
+  }
+}
+
+void sendDataToThingSpeakBill() {
+  ThingSpeak.setField(1, cardScanned ? 1 : 0);  // Send RFID scan status (1 for scanned, 0 for not scanned)
+  
+  int responseCode = ThingSpeak.writeFields(billchannelid, billWriteAPIKey);
   if (responseCode == 200) {
     Serial.println("✅ Data sent to ThingSpeak!");
   } else {
@@ -142,7 +164,8 @@ bool isCardScanned() {
     while (Serial.available()) {
       char c = Serial.read();
       rfidData += c;
-      delay(10);
+//      Serial.print(rfidData);
+      delay(100);
     }
     // If RFID data is received, return true
     if (rfidData.length() > 0) {
@@ -173,7 +196,7 @@ void calibrateACS712() {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   
   // Connect to Wi-Fi
   WiFi.begin(ssid, pass);
@@ -198,6 +221,7 @@ void loop() {
   // Regular ThingSpeak updates
   if (currentMillis - lastThingSpeakUpdate >= 15000) {
     sendDataToThingSpeak();
+    sendDataToThingSpeakBill();
     lastThingSpeakUpdate = currentMillis;
   }
 

@@ -4,6 +4,9 @@ import requests
 import json
 from pymongo import MongoClient
 from bson import ObjectId
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 
@@ -18,13 +21,100 @@ users = db['users']
 THINGSPEAK_CHANNEL_ID = "2571433"
 THINGSPEAK_READ_API_KEY = "U3XKH2HUOUUU7VA9"
 THINGSPEAK_BILL_CHANNEL_ID = "2463572"
-THINGSPEAK_WRITE_API_KEY = "YOUR_THINGSPEAK_WRITE_API_KEY"
+THINGSPEAK_WRITE_API_KEY = "D4DB9ZE264CRSE9P"
 BASE_URL = f"https://api.thingspeak.com/channels/{THINGSPEAK_CHANNEL_ID}"
 BILL_BASE_URL = f"https://api.thingspeak.com/channels/{THINGSPEAK_BILL_CHANNEL_ID}"
+
+# Email configuration
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USERNAME = "kr4785543@gmail.com"  # Replace with your email
+SMTP_PASSWORD = "qhuzwfrdagfyqemk"     # Replace with your app password
+ALERT_EMAIL = "sudheerthadikonda0605@gmail.com"  # Replace with owner's email
 
 # Constants
 COST_PER_KWH = 7  # Rs. 7 per kWh
 INITIAL_BALANCE = 100000  # Initial balance for new users
+
+def send_bill_alert(bill_details):
+    """Send email alert for unpaid bill"""
+    subject = "⚠️ Electricity Bill Payment Overdue"
+    
+    body = f"""
+    Dear Customer,
+
+    Your electricity bill for {bill_details['month']} is overdue.
+
+    Bill Details:
+    - Total Consumption: {bill_details['total_kwh']:.2f} kWh
+    - Amount Due: Rs. {bill_details['total_cost']:.2f}
+
+    Please make the payment as soon as possible to avoid service interruption.
+
+    Best regards,
+    Smart Meter System
+    """
+
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_USERNAME
+    msg['To'] = ALERT_EMAIL
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print(f"Bill alert email sent successfully to {ALERT_EMAIL}")
+    except Exception as e:
+        print(f"Failed to send email alert: {str(e)}")
+
+def check_unpaid_bills():
+    """Check for unpaid bills and send alerts"""
+    current_date = datetime.now()
+    start_date = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    # Remove the day>5 condition to check bills immediately
+    # Get current month's bill
+    pipeline = [
+        {
+            '$match': {
+                'timestamp': {
+                    '$gte': start_date,
+                    '$lt': current_date
+                }
+            }
+        },
+        {
+            '$group': {
+                '_id': None,
+                'total_kwh': {'$sum': '$total_kwh'},
+                'total_cost': {'$sum': '$cost'}
+            }
+        }
+    ]
+    
+    result = list(power_logs.aggregate(pipeline))
+    if result:
+        # Check if there's a paid bill record for current month
+        current_month_paid = bills.find_one({
+            'month': start_date.strftime('%B %Y'),
+            'paid_at': {'$exists': True}
+        })
+        
+        if not current_month_paid:
+            # Bill is unpaid, send alert
+            bill_details = {
+                'month': start_date.strftime('%B %Y'),
+                'total_kwh': result[0]['total_kwh'],
+                'total_cost': result[0]['total_cost']
+            }
+            send_bill_alert(bill_details)
+            print(f"Bill alert sent for {bill_details['month']}")  # Add debug print
+            return True  # Return True if alert was sent
+    return False  # Return False if no alert was sent
 
 def get_card_scan_status():
     """Check if card was scanned from ThingSpeak billing channel"""
@@ -191,72 +281,45 @@ def get_monthly_data():
         'sensor2_avg': [],
         'sensor3_avg': [],
         'sensor4_avg': [],
-        'total_kwh': []  # Changed from total_avg to total_kwh for clarity
+        'total_kwh': []
     }
-    
-    def safe_float(value):
-        """Safely convert value to float, return 0 if invalid"""
-        try:
-            if value is None:
-                return 0.0
-            return float(value)
-        except (ValueError, TypeError):
-            return 0.0
     
     # Get data for last 6 months
     for i in range(6):
         end_date = current_date - timedelta(days=30 * i)
         start_date = end_date - timedelta(days=30)
-        
         monthly_data['months'].insert(0, end_date.strftime('%B %Y'))
         
-        endpoint = f"{BASE_URL}/feeds.json"
-        params = {
-            'api_key': THINGSPEAK_READ_API_KEY,
-            'start': start_date.strftime('%Y-%m-%d'),
-            'end': end_date.strftime('%Y-%m-%d'),
-            'round': 2
-        }
+        # Get monthly bill data from MongoDB
+        pipeline = [
+            {
+                '$match': {
+                    'timestamp': {
+                        '$gte': start_date,
+                        '$lt': end_date
+                    }
+                }
+            },
+            {
+                '$group': {
+                    '_id': None,
+                    'avg_sensor1': {'$avg': '$sensor_values.sensor1'},
+                    'avg_sensor2': {'$avg': '$sensor_values.sensor2'},
+                    'avg_sensor3': {'$avg': '$sensor_values.sensor3'},
+                    'avg_sensor4': {'$avg': '$sensor_values.sensor4'},
+                    'total_kwh': {'$sum': '$total_kwh'}
+                }
+            }
+        ]
         
-        try:
-            response = requests.get(endpoint, params=params)
-            response.raise_for_status()
-            data = response.json()
-            feeds = data.get('feeds', [])
-            
-            if feeds:
-                # Get ampere values from fields 1, 2, 4, 5
-                sensor1_values = [safe_float(feed.get('field1')) for feed in feeds]
-                sensor2_values = [safe_float(feed.get('field2')) for feed in feeds]
-                sensor3_values = [safe_float(feed.get('field4')) for feed in feeds]
-                sensor4_values = [safe_float(feed.get('field5')) for feed in feeds]
-                
-                # Get kWh values from fields 3 and 6 and sum them
-                total_kwh = sum([
-                    safe_float(feed.get('field3', 0)) + safe_float(feed.get('field6', 0))
-                    for feed in feeds
-                ])
-                
-                # Calculate and store averages, avoiding division by zero
-                def safe_average(values):
-                    return round(sum(values) / len(values), 2) if values else 0
-                
-                monthly_data['sensor1_avg'].insert(0, safe_average(sensor1_values))
-                monthly_data['sensor2_avg'].insert(0, safe_average(sensor2_values))
-                monthly_data['sensor3_avg'].insert(0, safe_average(sensor3_values))
-                monthly_data['sensor4_avg'].insert(0, safe_average(sensor4_values))
-                monthly_data['total_kwh'].insert(0, round(total_kwh, 2))
-            else:
-                # Insert zeros if no data available
-                monthly_data['sensor1_avg'].insert(0, 0)
-                monthly_data['sensor2_avg'].insert(0, 0)
-                monthly_data['sensor3_avg'].insert(0, 0)
-                monthly_data['sensor4_avg'].insert(0, 0)
-                monthly_data['total_kwh'].insert(0, 0)
-                
-        except (requests.RequestException, KeyError, ValueError) as e:
-            print(f"Error fetching monthly data: {e}")
-            # Insert zeros on error
+        result = list(power_logs.aggregate(pipeline))
+        if result:
+            monthly_data['sensor1_avg'].insert(0, round(result[0].get('avg_sensor1', 0), 2))
+            monthly_data['sensor2_avg'].insert(0, round(result[0].get('avg_sensor2', 0), 2))
+            monthly_data['sensor3_avg'].insert(0, round(result[0].get('avg_sensor3', 0), 2))
+            monthly_data['sensor4_avg'].insert(0, round(result[0].get('avg_sensor4', 0), 2))
+            monthly_data['total_kwh'].insert(0, round(result[0].get('total_kwh', 0), 2))
+        else:
             monthly_data['sensor1_avg'].insert(0, 0)
             monthly_data['sensor2_avg'].insert(0, 0)
             monthly_data['sensor3_avg'].insert(0, 0)
@@ -267,6 +330,9 @@ def get_monthly_data():
 
 @app.route('/')
 def dashboard():
+    # Check for unpaid bills and store the result
+    alert_sent = check_unpaid_bills()
+    
     # Get current sensor values and total consumption
     sensor_values, total = get_thingspeak_data()
     monthly_data = get_monthly_data()
@@ -286,13 +352,15 @@ def dashboard():
     # Get current bill
     current_bill = get_current_bill()
     
+    # Add alert status to the template context
     return render_template('dashboard.html',
                          sensor_values=sensor_values,
                          total=total,
                          monthly_data=monthly_data,
                          balance=user['balance'],
                          current_bill=current_bill,
-                         payment_message=payment_message)
+                         payment_message=payment_message,
+                         alert_sent=alert_sent)  # Add this line
 
 @app.route('/add_balance', methods=['POST'])
 def add_balance():
@@ -321,8 +389,7 @@ def add_balance():
             'new_balance': new_balance
         })
     except Exception as e:
-        print(f"Error in add_balance: {str(e)}")  # Add this for debugging
-        return jsonify({'success': False, 'message': str(e)}), 400
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

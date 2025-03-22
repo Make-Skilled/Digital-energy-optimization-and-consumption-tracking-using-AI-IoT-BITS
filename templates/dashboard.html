@@ -70,7 +70,7 @@
         }
 
         .chart-container {
-            height: 450px;
+            height: 400px;
             margin: 20px 0;
         }
 
@@ -156,6 +156,22 @@
                 box-shadow: 0 0 0 0 rgba(46, 204, 113, 0);
             }
         }
+
+        .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -223,7 +239,10 @@
                         <div class="mt-3">
                             <div class="input-group">
                                 <input type="number" id="balanceAmount" class="form-control" placeholder="Enter amount">
-                                <button class="btn btn-success" onclick="addBalance()">Add Balance</button>
+                                <button class="btn btn-success d-flex align-items-center" onclick="addBalance()" id="addBalanceBtn">
+                                    <span>Add Balance</span>
+                                    <div class="spinner ms-2" id="balanceSpinner"></div>
+                                </button>
                             </div>
                             <div id="balanceMessage" class="mt-2"></div>
                         </div>
@@ -267,9 +286,12 @@
         </div>
 
         <!-- Refresh Button -->
-        <button onclick="location.reload()" class="btn btn-primary refresh-btn">
-            <i class="fas fa-sync-alt"></i> Refresh Data
-        </button>
+        <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 999">
+            <button onclick="location.reload()" class="btn btn-primary refresh-btn">
+                <i class="fas fa-sync-alt"></i> Refresh Data
+                <!-- <span id="refreshTimer" class="ms-2"></span> -->
+            </button>
+        </div>
     </div>
 
     <script>
@@ -396,20 +418,38 @@
             }
         });
 
-        // Auto-refresh every 15 seconds
-        setTimeout(() => {
-            location.reload();
-        }, 15000);
+        // Countdown timer for auto-refresh
+        let timeLeft = 15;
+        const timerElement = document.getElementById('refreshTimer');
+        
+        function updateTimer() {
+            timerElement.textContent = `(${timeLeft})`;
+            if (timeLeft === 0) {
+                location.reload();
+            } else {
+                timeLeft--;
+                setTimeout(updateTimer, 1000);
+            }
+        }
+        
+        updateTimer();
     </script>
 
     <script>
         function addBalance() {
+            const button = document.getElementById('addBalanceBtn');
+            const spinner = document.getElementById('balanceSpinner');
             const amount = parseFloat(document.getElementById('balanceAmount').value);
+            
             if (isNaN(amount) || amount <= 0) {
                 document.getElementById('balanceMessage').innerHTML = 
                     '<div class="alert alert-danger">Please enter a valid positive amount</div>';
                 return;
             }
+
+            // Disable button and show spinner
+            button.disabled = true;
+            spinner.style.display = 'block';
 
             fetch('/add_balance', {
                 method: 'POST',
@@ -430,7 +470,6 @@
                 if (data.success) {
                     document.getElementById('balanceMessage').innerHTML = 
                         '<div class="alert alert-success">' + data.message + '</div>';
-                    // Reload the page after 1.5 seconds
                     setTimeout(() => {
                         window.location.reload();
                     }, 1500);
@@ -440,11 +479,43 @@
                 }
             })
             .catch(error => {
-                console.error('Error:', error);  // Add this for debugging
+                console.error('Error:', error);
                 document.getElementById('balanceMessage').innerHTML = 
                     '<div class="alert alert-danger">Error updating balance. Please try again.</div>';
+            })
+            .finally(() => {
+                // Re-enable button and hide spinner
+                button.disabled = false;
+                spinner.style.display = 'none';
             });
         }
+    </script>
+
+    <script>
+        // Format numbers with commas
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+
+        // Update all number displays
+        document.addEventListener('DOMContentLoaded', function() {
+            // Format balance
+            const balance = parseFloat("{{ balance }}");
+            document.querySelector('.card-body h3').textContent = `Rs. ${formatNumber(balance.toFixed(2))}`;
+            
+            // Format current bill amount
+            {% if current_bill %}
+            const billAmount = parseFloat("{{ current_bill.total_cost }}");
+            document.querySelector('.card-body h4').textContent = `Amount Due: Rs. ${formatNumber(billAmount.toFixed(2))}`;
+            {% endif %}
+            
+            // Add input validation for balance amount
+            const balanceInput = document.getElementById('balanceAmount');
+            balanceInput.addEventListener('input', function() {
+                this.value = this.value.replace(/[^0-9.]/g, '');
+                if(this.value.split('.').length > 2) this.value = this.value.replace(/\.+$/, '');
+            });
+        });
     </script>
 </body>
 </html>

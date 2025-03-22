@@ -22,6 +22,8 @@ char billWriteAPIKey[] = "D4DB9ZE264CRSE9P";
 // Current Sensor Pins (ACS712)
 #define CURRENT_SENSOR_PIN1  35  // First ACS712 Sensor (A0)
 #define CURRENT_SENSOR_PIN2  34  // Second ACS712 Sensor (A1)
+#define CURRENT_SENSOR_PIN3  33  // First ACS712 Sensor (A0)
+#define CURRENT_SENSOR_PIN4  32  // Second ACS712 Sensor (A1)
 
 // Constants for ACS712
 #define ASSUMED_VOLTAGE 230.0    // Assume constant voltage (230V for AC mains)
@@ -31,11 +33,17 @@ float ACS_OFFSET = 0.0;         // Will be calibrated
 // Variables for power measurement
 float currentValue1 = 0.0;
 float currentValue2 = 0.0;
+float currentValue3 = 0.0;
+float currentValue4 = 0.0;
 float powerValue1 = 0.0;
 float powerValue2 = 0.0;
+float powerValue3 = 0.0;
+float powerValue4 = 0.0;
 float totalCurrent = 0.0;
-float totalPower = 0.0;
-float kWh = 0.0;
+float totalPower1 = 0.0;
+float kWh1 = 0.0;
+float totalPower2 = 0.0;
+float kWh2 = 0.0;
 
 
 // Timing variables
@@ -52,6 +60,8 @@ bool cardScanned = false;
 void measurePower() {
   float totalCurrent1 = 0;
   float totalCurrent2 = 0;
+  float totalCurrent3 = 0;
+  float totalCurrent4 = 0;
   int numSamples = 100;  // Noise reduction
 
   // Read from first current sensor
@@ -72,24 +82,50 @@ void measurePower() {
   }
   currentValue2 = totalCurrent2 / numSamples;
 
+  for (int i = 0; i < numSamples; i++) {
+    float currentSensorValue3 = analogRead(CURRENT_SENSOR_PIN3);
+    float currentVoltage3 = (currentSensorValue3 / 4095.0) * 3.3;
+    totalCurrent3 += (currentVoltage3 - ACS_OFFSET) / ACS_SENSITIVITY;
+    delayMicroseconds(100);
+  }
+  currentValue3 = totalCurrent3 / numSamples;
+
+  // Read from second current sensor
+  for (int i = 0; i < numSamples; i++) {
+    float currentSensorValue4 = analogRead(CURRENT_SENSOR_PIN4);
+    float currentVoltage4 = (currentSensorValue4 / 4095.0) * 3.3;
+    totalCurrent4 += (currentVoltage4 - ACS_OFFSET) / ACS_SENSITIVITY;
+    delayMicroseconds(100);
+  }
+  currentValue4 = totalCurrent4 / numSamples;
+
+
   // Calculate total current (sum of both sensors)
-  totalCurrent = currentValue1 + currentValue2;
+  totalCurrent = currentValue1 + currentValue2 + currentValue3 + currentValue4;
 
   // Calculate power (P = V * I) for both sensors
   powerValue1 = ASSUMED_VOLTAGE * currentValue1;
   powerValue2 = ASSUMED_VOLTAGE * currentValue2;
-  totalPower = powerValue1 + powerValue2;
+  powerValue3 = ASSUMED_VOLTAGE * currentValue3;
+  powerValue4 = ASSUMED_VOLTAGE * currentValue4;
+  totalPower1 = powerValue1 + powerValue2;
+  totalPower2 = powerValue3 + powerValue4;
 
   // Update kWh
   unsigned long currentMillis = millis();
-  kWh += totalPower * (currentMillis - lastPowerAlertTime) / 3600000.0;
+  kWh1 += totalPower1 * (currentMillis - lastPowerAlertTime) / 3600000.0;
+  kWh2 += totalPower2 * (currentMillis - lastPowerAlertTime) / 3600000.0;
   lastPowerAlertTime = currentMillis;
 
   // Store absolute values of power in new variables
   float absPowerValue1 = abs(powerValue1);
   float absPowerValue2 = abs(powerValue2);
-  float absTotalPower = abs(totalPower);
-  float absKWh = abs(kWh);
+  float absTotalPower1 = abs(totalPower1);
+  float absKWh1 = abs(kWh1);
+  float absPowerValue3 = abs(powerValue3);
+  float absPowerValue4 = abs(powerValue4);
+  float absTotalPower2 = abs(totalPower2);
+  float absKWh2 = abs(kWh2);
 
   // Print values at regular intervals
   if (currentMillis - lastPrintTime >= PRINT_INTERVAL) {
@@ -100,6 +136,12 @@ void measurePower() {
     Serial.println(" A");
     Serial.print("Current Sensor 2: "); 
     Serial.print(abs(currentValue2), 2);  // Use original values
+    Serial.println(" A");
+    Serial.print("Current Sensor 3: "); 
+    Serial.print(abs(currentValue3), 2);  // Use original values
+    Serial.println(" A");
+    Serial.print("Current Sensor 4: "); 
+    Serial.print(abs(currentValue4), 2);  // Use original values
     Serial.println(" A");
     
     Serial.print("Voltage:     ");
@@ -114,11 +156,21 @@ void measurePower() {
     Serial.print(absPowerValue2, 2);  // Use the absolute value
     Serial.println(" W");
 
+    Serial.print("Power Sensor 3: ");
+    Serial.print(absPowerValue3, 2);  // Use the absolute value
+    Serial.println(" W");
+
+    Serial.print("Power Sensor 4: ");
+    Serial.print(absPowerValue4, 2);  // Use the absolute value
+    Serial.println(" W");
+
     Serial.print("Total Power:  ");
+    float absTotalPower = abs(totalPower1) + abs(totalPower2);  
     Serial.print(absTotalPower, 2);  // Use the absolute value
     Serial.println(" W");
 
     Serial.print("Energy:      ");
+    float absKWh = abs(kWh1) + abs(kWh2);
     Serial.print(absKWh, 3);  // Use the absolute value
     Serial.println(" kWh");
 
@@ -134,7 +186,8 @@ void measurePower() {
 }
 
 void displayBillAndPower() {
-  float billAmount = kWh * 7.0;
+  float billAmount = abs(kWh1 + kWh2) * 7.0;
+  float totalPower = abs(totalPower1) + abs(totalPower2);
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Power: ");
@@ -149,7 +202,10 @@ void displayBillAndPower() {
 void sendDataToThingSpeak() {
   ThingSpeak.setField(1, abs(powerValue1));
   ThingSpeak.setField(2, abs(powerValue2));
-  ThingSpeak.setField(3, abs(kWh));
+  ThingSpeak.setField(3, abs(kWh1));
+  ThingSpeak.setField(4, abs(powerValue3));
+  ThingSpeak.setField(5, abs(powerValue4));
+  ThingSpeak.setField(6, abs(kWh2));
   ThingSpeak.setField(1, cardScanned ? 1 : 0);  // Send RFID scan status (1 for scanned, 0 for not scanned)
   
   int responseCode = ThingSpeak.writeFields(channelid, thingSpeakWriteAPIKey);
@@ -204,6 +260,8 @@ void calibrateACS712() {
   for (int i = 0; i < numSamples; i++) {
     total += (analogRead(CURRENT_SENSOR_PIN1) / 4095.0) * 3.3;
     total += (analogRead(CURRENT_SENSOR_PIN2) / 4095.0) * 3.3;
+    total += (analogRead(CURRENT_SENSOR_PIN3) / 4095.0) * 3.3;
+    total += (analogRead(CURRENT_SENSOR_PIN4) / 4095.0) * 3.3;
     delay(1);
   }
 

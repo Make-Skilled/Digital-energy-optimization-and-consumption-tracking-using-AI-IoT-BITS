@@ -72,11 +72,20 @@ def send_bill_alert(bill_details):
         print(f"Failed to send email alert: {str(e)}")
 
 def check_unpaid_bills():
-    """Check for unpaid bills and send alerts"""
+    """Check for unpaid bills and send alerts with 1-minute cooldown"""
     current_date = datetime.now()
     start_date = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     
-    # Remove the day>5 condition to check bills immediately
+    # Check when the last alert was sent
+    last_alert = bills.find_one(
+        {'alert_sent_at': {'$exists': True}},
+        sort=[('alert_sent_at', -1)]
+    )
+    
+    # If an alert was sent in the last minute, don't send another
+    if last_alert and (current_date - last_alert['alert_sent_at']).total_seconds() < 60:  # 60 seconds = 1 minute
+        return False
+    
     # Get current month's bill
     pipeline = [
         {
@@ -112,9 +121,19 @@ def check_unpaid_bills():
                 'total_cost': result[0]['total_cost']
             }
             send_bill_alert(bill_details)
-            print(f"Bill alert sent for {bill_details['month']}")  # Add debug print
-            return True  # Return True if alert was sent
-    return False  # Return False if no alert was sent
+            
+            # Record that an alert was sent
+            bills.insert_one({
+                'alert_sent_at': current_date,
+                'month': start_date.strftime('%B %Y'),
+                'total_kwh': result[0]['total_kwh'],
+                'total_cost': result[0]['total_cost'],
+                'alert_type': 'unpaid_bill'
+            })
+            
+            print(f"Bill alert sent for {bill_details['month']}")
+            return True
+    return False
 
 def get_card_scan_status():
     """Check if card was scanned from ThingSpeak billing channel"""
@@ -330,8 +349,15 @@ def get_monthly_data():
 
 @app.route('/')
 def dashboard():
-    # Check for unpaid bills and store the result
-    alert_sent = check_unpaid_bills()
+    # Only check for unpaid bills every minute
+    alert_sent = False
+    last_alert = bills.find_one(
+        {'alert_type': 'unpaid_bill'},
+        sort=[('alert_sent_at', -1)]
+    )
+    
+    if not last_alert or (datetime.now() - last_alert['alert_sent_at']).total_seconds() >= 60:
+        alert_sent = check_unpaid_bills()
     
     # Get current sensor values and total consumption
     sensor_values, total = get_thingspeak_data()
@@ -352,7 +378,6 @@ def dashboard():
     # Get current bill
     current_bill = get_current_bill()
     
-    # Add alert status to the template context
     return render_template('dashboard.html',
                          sensor_values=sensor_values,
                          total=total,
@@ -360,7 +385,7 @@ def dashboard():
                          balance=user['balance'],
                          current_bill=current_bill,
                          payment_message=payment_message,
-                         alert_sent=alert_sent)  # Add this line
+                         alert_sent=alert_sent)  # Add this line to pass alert_sent to the template
 
 @app.route('/add_balance', methods=['POST'])
 def add_balance():

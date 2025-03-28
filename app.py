@@ -28,9 +28,9 @@ BILL_BASE_URL = f"https://api.thingspeak.com/channels/{THINGSPEAK_BILL_CHANNEL_I
 # Email configuration
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_USERNAME = "kr4785543@gmail.com"  # Replace with your email
-SMTP_PASSWORD = "qhuzwfrdagfyqemk"     # Replace with your app password
-ALERT_EMAIL = "sudheerthadikonda0605@gmail.com"  # Replace with owner's email
+SMTP_USERNAME = "kr4785543@gmail.com"  # Replace with your email address (https://support.google.com/accounts/answer/185833?hl=en)
+SMTP_PASSWORD = "qhuzwfrdagfyqemk"     # Replace with your app password (https://support.google.com/accounts/answer/185833?hl=en)
+ALERT_EMAIL = "sudheerthadikonda0605@gmail.com"  # Replace with owner's email address
 
 # Constants
 COST_PER_KWH = 7  # Rs. 7 per kWh
@@ -38,102 +38,122 @@ INITIAL_BALANCE = 100000  # Initial balance for new users
 
 def send_bill_alert(bill_details):
     """Send email alert for unpaid bill"""
-    subject = "⚠️ Electricity Bill Payment Overdue"
-    
-    body = f"""
-    Dear Customer,
-
-    Your electricity bill for {bill_details['month']} is overdue.
-
-    Bill Details:
-    - Total Consumption: {bill_details['total_kwh']:.2f} kWh
-    - Amount Due: Rs. {bill_details['total_cost']:.2f}
-
-    Please make the payment as soon as possible to avoid service interruption.
-
-    Best regards,
-    Smart Meter System
-    """
-
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_USERNAME
-    msg['To'] = ALERT_EMAIL
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-
     try:
+        print("Preparing to send bill alert email...")  # Debug print
+        
+        subject = "⚠️ Electricity Bill Payment Due"
+        
+        body = f"""
+        Dear Customer,
+
+        This is a reminder about your electricity bill for {bill_details['month']}.
+
+        Bill Details:
+        - Total Consumption: {bill_details['total_kwh']:.2f} kWh
+        - Amount Due: Rs. {bill_details['total_cost']:.2f}
+
+        Please make the payment at your earliest convenience.
+
+        Best regards,
+        Smart Meter System
+        """
+
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USERNAME
+        msg['To'] = ALERT_EMAIL
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        print(f"Connecting to SMTP server: {SMTP_SERVER}:{SMTP_PORT}")  # Debug print
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        
+        print("Starting TLS...")  # Debug print
         server.starttls()
+        
+        print(f"Logging in with username: {SMTP_USERNAME}")  # Debug print
         server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        
+        print("Sending email...")  # Debug print
         server.send_message(msg)
+        
+        print("Closing SMTP connection...")  # Debug print
         server.quit()
+        
         print(f"Bill alert email sent successfully to {ALERT_EMAIL}")
+        return True
+        
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"SMTP Authentication failed: {str(e)}")
+        print("Please check your email and app password")
+        return False
+    except smtplib.SMTPException as e:
+        print(f"SMTP error occurred: {str(e)}")
+        return False
     except Exception as e:
-        print(f"Failed to send email alert: {str(e)}")
+        print(f"Unexpected error while sending email: {str(e)}")
+        return False
 
 def check_unpaid_bills():
-    """Check for unpaid bills and send alerts with 1-minute cooldown"""
-    current_date = datetime.now()
-    start_date = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    
-    # Check when the last alert was sent
-    last_alert = bills.find_one(
-        {'alert_sent_at': {'$exists': True}},
-        sort=[('alert_sent_at', -1)]
-    )
-    
-    # If an alert was sent in the last minute, don't send another
-    if last_alert and (current_date - last_alert['alert_sent_at']).total_seconds() < 60:  # 60 seconds = 1 minute
-        return False
-    
-    # Get current month's bill
-    pipeline = [
-        {
-            '$match': {
-                'timestamp': {
-                    '$gte': start_date,
-                    '$lt': current_date
+    """Check for unpaid bills and send alerts"""
+    try:
+        current_date = datetime.now()
+        start_date = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        # Get current month's consumption
+        pipeline = [
+            {
+                '$match': {
+                    'timestamp': {
+                        '$gte': start_date,
+                        '$lt': current_date
+                    }
+                }
+            },
+            {
+                '$group': {
+                    '_id': None,
+                    'total_kwh': {'$sum': '$total_kwh'},
+                    'total_cost': {'$sum': '$cost'}
                 }
             }
-        },
-        {
-            '$group': {
-                '_id': None,
-                'total_kwh': {'$sum': '$total_kwh'},
-                'total_cost': {'$sum': '$cost'}
-            }
-        }
-    ]
-    
-    result = list(power_logs.aggregate(pipeline))
-    if result:
-        # Check if there's a paid bill record for current month
-        current_month_paid = bills.find_one({
-            'month': start_date.strftime('%B %Y'),
-            'paid_at': {'$exists': True}
-        })
+        ]
         
-        if not current_month_paid:
-            # Bill is unpaid, send alert
-            bill_details = {
+        result = list(power_logs.aggregate(pipeline))
+        if result:
+            # Check if there's a paid bill record for current month
+            current_month_paid = bills.find_one({
                 'month': start_date.strftime('%B %Y'),
-                'total_kwh': result[0]['total_kwh'],
-                'total_cost': result[0]['total_cost']
-            }
-            send_bill_alert(bill_details)
-            
-            # Record that an alert was sent
-            bills.insert_one({
-                'alert_sent_at': current_date,
-                'month': start_date.strftime('%B %Y'),
-                'total_kwh': result[0]['total_kwh'],
-                'total_cost': result[0]['total_cost'],
-                'alert_type': 'unpaid_bill'
+                'paid_at': {'$exists': True}
             })
             
-            print(f"Bill alert sent for {bill_details['month']}")
-            return True
-    return False
+            if not current_month_paid and result[0]['total_cost'] > 0:  # Only send if there's actual consumption
+                # Bill is unpaid, send alert
+                bill_details = {
+                    'month': start_date.strftime('%B %Y'),
+                    'total_kwh': result[0]['total_kwh'],
+                    'total_cost': result[0]['total_cost']
+                }
+                
+                print(f"Attempting to send bill alert for {bill_details['month']}")  # Debug print
+                print(f"Bill amount: Rs. {bill_details['total_cost']:.2f}")  # Debug print
+                
+                email_sent = send_bill_alert(bill_details)
+                if email_sent:
+                    print(f"Bill alert successfully sent for {bill_details['month']}")
+                    return True
+                else:
+                    print("Failed to send bill alert email")
+                    return False
+            else:
+                print("No unpaid bill found or bill amount is zero")  # Debug print
+        else:
+            print("No consumption data found for current month")  # Debug print
+            
+        return False
+        
+    except Exception as e:
+        print(f"Error in check_unpaid_bills: {str(e)}")  # Debug print
+        return False
 
 def get_card_scan_status():
     """Check if card was scanned from ThingSpeak billing channel"""
@@ -349,15 +369,8 @@ def get_monthly_data():
 
 @app.route('/')
 def dashboard():
-    # Only check for unpaid bills every minute
-    alert_sent = False
-    last_alert = bills.find_one(
-        {'alert_type': 'unpaid_bill'},
-        sort=[('alert_sent_at', -1)]
-    )
-    
-    if not last_alert or (datetime.now() - last_alert['alert_sent_at']).total_seconds() >= 60:
-        alert_sent = check_unpaid_bills()
+    # Check for unpaid bills and store the result
+    alert_sent = check_unpaid_bills()
     
     # Get current sensor values and total consumption
     sensor_values, total = get_thingspeak_data()
@@ -378,6 +391,7 @@ def dashboard():
     # Get current bill
     current_bill = get_current_bill()
     
+    # Add alert status to the template context
     return render_template('dashboard.html',
                          sensor_values=sensor_values,
                          total=total,
@@ -385,7 +399,8 @@ def dashboard():
                          balance=user['balance'],
                          current_bill=current_bill,
                          payment_message=payment_message,
-                         alert_sent=alert_sent)  # Add this line to pass alert_sent to the template
+                         alert_sent=alert_sent,
+                         config={'ALERT_EMAIL': ALERT_EMAIL})
 
 @app.route('/add_balance', methods=['POST'])
 def add_balance():

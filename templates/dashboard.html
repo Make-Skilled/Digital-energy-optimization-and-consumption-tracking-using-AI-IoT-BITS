@@ -188,6 +188,14 @@
     </div>
 
     <div class="container">
+        <!-- Alert Message -->
+        {% if alert_sent %}
+        <div class="alert alert-info alert-dismissible fade show" role="alert">
+            <strong>Notice:</strong> A bill payment reminder has been sent to {{ config.ALERT_EMAIL }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endif %}
+
         <!-- Sensor Gauges -->
         <div class="row g-4 mb-4">
             <div class="col-md-3">
@@ -517,5 +525,7 @@
             });
         });
     </script>
+    <!-- Bootstrap JS Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

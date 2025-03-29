@@ -118,41 +118,50 @@ def check_unpaid_bills():
             }
         ]
         
+        print("Checking for unpaid bills...")  # Debug print
+        
         result = list(power_logs.aggregate(pipeline))
         if result:
+            total_cost = result[0]['total_cost']
+            total_kwh = result[0]['total_kwh']
+            
+            print(f"Found consumption - Total kWh: {total_kwh}, Cost: Rs. {total_cost}")  # Debug print
+            
             # Check if there's a paid bill record for current month
             current_month_paid = bills.find_one({
                 'month': start_date.strftime('%B %Y'),
                 'paid_at': {'$exists': True}
             })
             
-            if not current_month_paid and result[0]['total_cost'] > 0:  # Only send if there's actual consumption
-                # Bill is unpaid, send alert
+            if current_month_paid:
+                print(f"Bill for {start_date.strftime('%B %Y')} already paid")  # Debug print
+                return False
+            
+            if total_cost > 0:
                 bill_details = {
                     'month': start_date.strftime('%B %Y'),
-                    'total_kwh': result[0]['total_kwh'],
-                    'total_cost': result[0]['total_cost']
+                    'total_kwh': total_kwh,
+                    'total_cost': total_cost
                 }
                 
-                print(f"Attempting to send bill alert for {bill_details['month']}")  # Debug print
-                print(f"Bill amount: Rs. {bill_details['total_cost']:.2f}")  # Debug print
+                print(f"Unpaid bill found - Month: {bill_details['month']}, Amount: Rs. {bill_details['total_cost']:.2f}")
                 
                 email_sent = send_bill_alert(bill_details)
                 if email_sent:
-                    print(f"Bill alert successfully sent for {bill_details['month']}")
+                    print("Bill alert email sent successfully")
                     return True
                 else:
                     print("Failed to send bill alert email")
                     return False
             else:
-                print("No unpaid bill found or bill amount is zero")  # Debug print
+                print(f"Bill amount is zero. Total cost: Rs. {total_cost:.2f}")
         else:
-            print("No consumption data found for current month")  # Debug print
+            print("No consumption data found for current month")
             
         return False
         
     except Exception as e:
-        print(f"Error in check_unpaid_bills: {str(e)}")  # Debug print
+        print(f"Error in check_unpaid_bills: {str(e)}")
         return False
 
 def get_card_scan_status():
@@ -367,10 +376,71 @@ def get_monthly_data():
     
     return monthly_data
 
+def send_current_bill_email():
+    """Send current month's bill details via email"""
+    try:
+        current_bill = get_current_bill()
+        if not current_bill:
+            print("No current bill available to send")
+            return False
+            
+        print("Preparing to send current bill email...")
+        
+        subject = "📊 Your Current Electricity Bill Statement"
+        
+        body = f"""
+        Dear Customer,
+
+        Here is your electricity bill statement for {current_bill['month']}.
+
+        Bill Details:
+        - Total Consumption: {current_bill['total_kwh']:.2f} kWh
+        - Current Amount: Rs. {current_bill['total_cost']:.2f}
+
+        This is an automated bill statement for your reference.
+
+        Best regards,
+        Smart Meter System
+        """
+
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USERNAME
+        msg['To'] = ALERT_EMAIL
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        print(f"Connecting to SMTP server: {SMTP_SERVER}:{SMTP_PORT}")
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        
+        print("Sending current bill email...")
+        server.send_message(msg)
+        server.quit()
+        
+        print(f"Current bill email sent successfully to {ALERT_EMAIL}")
+        return True
+        
+    except Exception as e:
+        print(f"Error sending current bill email: {str(e)}")
+        return False
+
+@app.route('/send_current_bill')
+def send_current_bill():
+    """Endpoint to send current bill via email"""
+    success = send_current_bill_email()
+    return jsonify({
+        'success': success,
+        'message': 'Current bill email sent successfully' if success else 'Failed to send current bill email'
+    })
+
 @app.route('/')
 def dashboard():
-    # Check for unpaid bills and store the result
+    # Check for unpaid bills and send alert
     alert_sent = check_unpaid_bills()
+    
+    # Send current bill email
+    current_bill_sent = send_current_bill_email()
     
     # Get current sensor values and total consumption
     sensor_values, total = get_thingspeak_data()
@@ -391,7 +461,6 @@ def dashboard():
     # Get current bill
     current_bill = get_current_bill()
     
-    # Add alert status to the template context
     return render_template('dashboard.html',
                          sensor_values=sensor_values,
                          total=total,
@@ -400,6 +469,7 @@ def dashboard():
                          current_bill=current_bill,
                          payment_message=payment_message,
                          alert_sent=alert_sent,
+                         current_bill_sent=current_bill_sent,
                          config={'ALERT_EMAIL': ALERT_EMAIL})
 
 @app.route('/add_balance', methods=['POST'])
@@ -430,6 +500,69 @@ def add_balance():
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/check_bill_status')
+def check_bill_status():
+    """Debug endpoint to check current bill status"""
+    try:
+        current_date = datetime.now()
+        start_date = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        # Get current consumption
+        pipeline = [
+            {
+                '$match': {
+                    'timestamp': {
+                        '$gte': start_date,
+                        '$lt': current_date
+                    }
+                }
+            },
+            {
+                '$group': {
+                    '_id': None,
+                    'total_kwh': {'$sum': '$total_kwh'},
+                    'total_cost': {'$sum': '$cost'}
+                }
+            }
+        ]
+        
+        result = list(power_logs.aggregate(pipeline))
+        
+        # Check if bill is paid
+        current_month_paid = bills.find_one({
+            'month': start_date.strftime('%B %Y'),
+            'paid_at': {'$exists': True}
+        })
+        
+        status = {
+            'current_month': start_date.strftime('%B %Y'),
+            'has_consumption_data': bool(result),
+            'total_kwh': result[0]['total_kwh'] if result else 0,
+            'total_cost': result[0]['total_cost'] if result else 0,
+            'is_paid': bool(current_month_paid),
+            'last_payment_date': current_month_paid['paid_at'].strftime('%Y-%m-%d %H:%M:%S') if current_month_paid else None
+        }
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/force_bill_alert')
+def force_bill_alert():
+    """Debug endpoint to force send a bill alert"""
+    current_bill = get_current_bill()
+    if current_bill:
+        email_sent = send_bill_alert(current_bill)
+        return jsonify({
+            'success': email_sent,
+            'bill_details': current_bill
+        })
+    return jsonify({
+        'success': False,
+        'error': 'No current bill found'
+    })
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -189,12 +189,14 @@
 
     <div class="container">
         <!-- Alert Message -->
-        {% if alert_sent %}
-        <div class="alert alert-info alert-dismissible fade show" role="alert">
-            <strong>Notice:</strong> A bill payment reminder has been sent to {{ config.ALERT_EMAIL }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <div class="alert alert-info" role="alert">
+            {% if current_bill_sent %}
+                <i class="fas fa-envelope"></i> Current bill statement has been sent to {{ config.ALERT_EMAIL }}
+            {% endif %}
+            {% if alert_sent %}
+                <br><i class="fas fa-exclamation-triangle"></i> Unpaid bill alert has been sent to {{ config.ALERT_EMAIL }}
+            {% endif %}
         </div>
-        {% endif %}
 
         <!-- Sensor Gauges -->
         <div class="row g-4 mb-4">
